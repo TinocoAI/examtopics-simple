@@ -132,6 +132,8 @@ Give a clear, informative 1-sentence description detailing the core domains test
   app.post("/api/scrape-exam", async (req, res) => {
     try {
       const { provider, examCode, examName } = req.body;
+      const count = Math.min(20, Math.max(1, parseInt(req.body.count as string) || 10)); // Limit single batch to max 20 to prevent Gemini token limit truncation
+      const startNumber = Math.max(1, parseInt(req.body.startNumber as string) || 1);
 
       if (!provider || !examCode || !examName) {
         return res.status(400).json({ error: "Missing required fields: provider, examCode, examName" });
@@ -140,11 +142,12 @@ Give a clear, informative 1-sentence description detailing the core domains test
       const client = getGeminiClient();
 
       const prompt = `You are an expert IT certification training system and automated examtopics web scraper.
-Your objective is to scrape, parse, and generate 10 highly realistic, high-quality, technically precise exam prep questions for:
+Your objective is to scrape, parse, and generate exactly ${count} highly realistic, high-quality, technically precise exam prep questions for:
 Provider: ${provider}
 Exam Code: ${examCode}
 Exam Name: ${examName}
 
+Start numbering the questions from question number ${startNumber} sequentially up to ${startNumber + count - 1}.
 Ensure:
 - Questions reflect the exact style, wording, scenarios, and difficulty of the real ExamTopics certifications.
 - Include architectural scenario questions, configuration scenarios, or troubleshooting.
@@ -163,7 +166,7 @@ Return the output strictly in the requested JSON structure.`;
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
-            description: "Array of exactly 10 high-quality certification questions",
+            description: `Array of exactly ${count} high-quality certification questions starting at question ${startNumber}`,
             items: {
               type: Type.OBJECT,
               properties: {

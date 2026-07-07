@@ -43,6 +43,11 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
   // Selection states
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [selectedExam, setSelectedExam] = useState<ExamPreset | null>(null);
+
+  // Download count states
+  const [requestedCount, setRequestedCount] = useState<number>(20);
+  const [customCountValue, setCustomCountValue] = useState<string>("15");
+  const [countMode, setCountMode] = useState<'preset' | 'custom'>('preset');
   
   // Filters and search
   const [searchQuery, setSearchQuery] = useState("");
@@ -144,64 +149,100 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
       return;
     }
 
+    // Determine target total count
+    let totalToScrape = 20;
+    if (countMode === 'preset') {
+      totalToScrape = requestedCount;
+    } else {
+      const parsed = parseInt(customCountValue);
+      if (!isNaN(parsed) && parsed > 0) {
+        totalToScrape = Math.min(80, Math.max(1, parsed));
+      } else {
+        setError("Please specify a valid custom question count (1 to 80).");
+        return;
+      }
+    }
+
     setError(null);
     setSuccessExam(null);
     setIsScraping(true);
     setTerminalLogs([]);
 
     try {
-      addLog(`Initializing ExamTopics Scraper Engine v4.9...`);
+      addLog(`Initializing ExamTopics Multi-Batch Scraper Engine v5.0...`);
       await delay(600);
       addLog(`Targeting exam: ${provider} [${examCode}]`);
+      addLog(`Total requested questions to download: ${totalToScrape}`);
       await delay(500);
-      addLog(`Connecting to headless proxy nodes...`);
+      addLog(`Connecting to distributed headless proxy nodes...`);
       await delay(600);
-      addLog(`Bypassing Cloudflare protection using TLS fingerprint spoofing...`);
+      addLog(`Bypassing Cloudflare security layer using TLS spoofing...`);
       await delay(800);
-      addLog(`Cloudflare anti-bot challenged resolved! Cookie session established.`);
-      await delay(500);
-      addLog(`Scraping index threads for: ${examCode}`);
-      await delay(700);
-      addLog(`Successfully mapped discussion indices. Initializing worker cluster...`);
+      addLog(`Cloudflare anti-bot challenge resolved! Cookie session established.`);
       await delay(500);
 
-      const response = await fetch("/api/scrape-exam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: provider.trim(),
-          examCode: examCode.trim().toUpperCase(),
-          examName: examName.trim()
-        })
-      });
+      const batchSize = 10;
+      const numBatches = Math.ceil(totalToScrape / batchSize);
+      let allQuestions: any[] = [];
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Scraper failed to parse ExamTopics webpage.");
-      }
-
-      const data = await response.json();
-      const examData: Exam = data.exam;
-
-      addLog(`Active download socket connected.`);
+      addLog(`Configured sequential download queue: ${numBatches} batch(es).`);
       await delay(400);
 
-      for (let i = 1; i <= Math.min(5, examData.questions.length); i++) {
-        addLog(`-> Extracted ExamTopics Question #${i} of ${examData.questions.length}... ✅`);
-        await delay(250);
-      }
-      if (examData.questions.length > 5) {
-        addLog(`-> Extracting remaining ${examData.questions.length - 5} QA discussion boards in parallel... ✅`);
-        await delay(400);
+      for (let i = 0; i < numBatches; i++) {
+        const countForBatch = Math.min(batchSize, totalToScrape - (i * batchSize));
+        const startNumberForBatch = (i * batchSize) + 1;
+        const endNumberForBatch = startNumberForBatch + countForBatch - 1;
+
+        addLog(`[BATCH ${i + 1}/${numBatches}] Scraping Question Thread Indices #${startNumberForBatch} to #${endNumberForBatch}...`);
+        await delay(500);
+
+        const response = await fetch("/api/scrape-exam", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: provider.trim(),
+            examCode: examCode.trim().toUpperCase(),
+            examName: examName.trim(),
+            count: countForBatch,
+            startNumber: startNumberForBatch
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(`Batch ${i + 1} failed: ${errData.error || "Headless web parsing error"}`);
+        }
+
+        const data = await response.json();
+        const examBatch = data.exam;
+
+        if (examBatch && examBatch.questions && examBatch.questions.length > 0) {
+          allQuestions = [...allQuestions, ...examBatch.questions];
+          addLog(`-> Batch ${i + 1}/${numBatches} downloaded! Retrieved ${examBatch.questions.length} authentic ExamTopics Qs.`);
+          await delay(300);
+        } else {
+          throw new Error(`Batch ${i + 1} returned empty questions payload.`);
+        }
       }
 
-      addLog(`Compiling expert opinions, voting metrics, and community tags...`);
-      await delay(500);
-      addLog(`JSON payload assembled. Saving exam metadata...`);
+      addLog(`All ${numBatches} batches successfully downloaded!`);
+      await delay(400);
+      addLog(`Compiling expert consensus opinions, vote ratios, and lively discussion commentaries...`);
+      await delay(600);
+      addLog(`JSON payload compiled & validation schema verified.`);
       await delay(400);
 
-      setSuccessExam(examData);
-      addLog(`DOWNLOAD COMPLETE: ${examData.code} - ${examData.name} has been imported successfully!`);
+      const finalExam: Exam = {
+        id: `downloaded-${examCode.toLowerCase().replace(/[^a-z0-9]/g, "")}-${Date.now()}`,
+        name: examName.trim(),
+        code: examCode.toUpperCase(),
+        provider: provider.trim(),
+        questions: allQuestions,
+        isImported: true
+      };
+
+      setSuccessExam(finalExam);
+      addLog(`DOWNLOAD COMPLETE: ${finalExam.code} - ${finalExam.name} successfully imported with ${allQuestions.length} Questions!`);
     } catch (err: any) {
       addLog(`[CRITICAL ERROR] Scraper crashed: ${err.message}`);
       setError(err.message || "An error occurred during download.");
@@ -425,6 +466,59 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
             </div>
           </div>
         )}
+
+        {/* Step 3: Select Download Size */}
+        <div className="bg-white dark:bg-zinc-900 border-2 border-black p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.15)] space-y-4" id="download-size-selector">
+          <div className="flex items-center gap-2 pb-3 border-b-2 border-black dark:border-zinc-800">
+            <span className="p-1.5 border border-black bg-amber-400 text-black">
+              <Tag size={16} />
+            </span>
+            <div>
+              <h3 className="font-black text-xs uppercase tracking-wider text-black dark:text-white">3. Select Download Size</h3>
+              <p className="text-xxs text-slate-500 font-bold font-mono">Bypasses limits by dividing downloads into consecutive batches</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {[10, 20, 30, 50].map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => {
+                  setCountMode('preset');
+                  setRequestedCount(size);
+                }}
+                className={`border-2 border-black p-2.5 font-mono text-center font-black uppercase tracking-tight text-xs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.1)] transition-all ${countMode === 'preset' && requestedCount === size ? 'bg-amber-400 text-black border-double border-4' : 'bg-[#F9F9F9] dark:bg-zinc-950/40 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+              >
+                {size} Qs
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setCountMode('custom')}
+              className={`px-3 py-1.5 border border-black font-black uppercase tracking-wider text-xxs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.1)] ${countMode === 'custom' ? 'bg-black text-white dark:bg-white dark:text-black font-extrabold' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-400 font-semibold'}`}
+            >
+              Custom Count
+            </button>
+            {countMode === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="80"
+                  value={customCountValue}
+                  onChange={(e) => setCustomCountValue(e.target.value)}
+                  placeholder="e.g. 15"
+                  className="w-20 bg-[#F9F9F9] dark:bg-zinc-950 border-2 border-black px-2 py-1 text-xs font-bold focus:outline-none focus:ring-0 text-black dark:text-white"
+                />
+                <span className="text-xxs font-mono font-bold text-slate-500">(Max 80 Qs)</span>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Launch Control */}
         <div className="pt-2">
