@@ -1,0 +1,6 @@
+{
+  "name": "ExamTopics Practice Simulator",
+  "description": "An interactive exam simulator that imports ExamTopics scraper outputs, persists progress, and uses Gemini AI to explain certification questions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

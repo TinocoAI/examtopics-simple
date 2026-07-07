@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #FF3E00;
+  --color-neon-green: #00FF41;
+  --color-artistic-bg: #FFFFFF;
+  --color-artistic-gray: #F5F5F5;
+}
+
+@layer utilities {
+  .neo-border {
+    border: 2px solid currentColor;
+  }
+  .neo-shadow {
+    box-shadow: 4px 4px 0px 0px currentColor;
+  }
+  .neo-shadow-sm {
+    box-shadow: 2px 2px 0px 0px currentColor;
+  }
+  .neo-shadow-lg {
+    box-shadow: 6px 6px 0px 0px currentColor;
+  }
+}
+
+/* Custom global overrides for neo-brutalist design elements */
+body {
+  @apply font-sans;
+}
+
+/* Perspective utilities for flashcards */
+.perspective-1000 {
+  perspective: 1000px;
+}
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+}
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
