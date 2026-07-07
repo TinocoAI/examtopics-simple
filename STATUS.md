@@ -1,7 +1,7 @@
 # ExamTopics 4All - Ponto de Situação
 
-**Data:** 7 de julho de 2026  
-**Estado:** Servidor ativo e acessível via meshnet
+**Data:** 8 de julho de 2026, 08:40 JST  
+**Estado:** Servidor ativo e acessível via meshnet — ✅ verificado
 
 ---
 
@@ -13,53 +13,38 @@
 - **Branch:** main
 
 ### 2. Integração Gemini removida (a pedido do utilizador)
-**Backend (`server.ts`):**
-- Removidas dependências: `@google/genai`, `dotenv`
-- Removidas rotas: `/api/examtopics-exams`, `/api/scrape-exam`, `/api/explain`
-- Mantidas rotas estáticas: `/api/health`, `/api/examtopics-vendors`
-- Tamanho do backend: 16.7kb → 5.0kb (70% menor)
-
-**Frontend (`ExamSimulator.tsx`):**
-- Removidas variáveis de estado: `aiExplanations`, `loadingAi`, `aiError`
-- Removida função: `handleGetAiExplanation`
-- Removido painel "AI Explainer" completo (botão "Explain with Gemini AI")
-- Removidos imports: `Sparkles`, `RefreshCw` do lucide-react
-- Removida função `renderMarkdownExplanation` (desnecessária)
-- Atualizada mensagem no flashcard: "Inspect the 'Discussion Board' below for community explanations."
-
-**Ficheiros de configuração:**
-- `metadata.json`: removida capacidade `SERVER_SIDE_GEMINI_API`
-- `.env.example`: limpo, sem `GEMINI_API_KEY`
-- `README.md`: passos simplificados
-- `App.tsx`: "Companion & Explainer" → "Companion"
-- `App.tsx` footer: removido "Powered by Gemini AI"
+- Removidas todas as dependências e rotas Gemini AI
 
 ### 3. Build e produção
 - **Build de produção:** `npm run build` (frontend + backend compilados)
-- **Frontend:** servido via Express em modo produção (`dist/`)
-- **Backend:** `dist/server.cjs` (Node.js)
+- **Serviço systemd:** `examtopics-4all.service` ativo e enabled
 
-### 4. Serviço systemd criado
-- **Nome:** `examtopics-4all.service`
-- **Estado:** ativo e ativado (starts on boot)
-- **Ficheiro:** `/etc/systemd/system/examtopics-4all.service`
-- **Configuração:**
-  - `WorkingDirectory`: `/root/examtopics-4all`
-  - `Environment`: `NODE_ENV=production`
-  - `EnvironmentFile`: `/root/examtopics-4all/.env`
-  - `ExecStartPre`: `npm run build` (reconstrói o projeto antes de iniciar)
-  - `ExecStart`: `node /root/examtopics-4all/dist/server.cjs`
-  - `Restart`: `on-failure`
-  - `Bind`: `100.96.178.158:3000` (apenas meshnet)
+### 4. Version Tracking System (v2.0.0 — NOVO)
+- **Version Picker UI:** tab "Versions" no header com histórico completo
+- **API de versionamento:**
+  - `GET /api/versions` — lista o changelog com todas as versões
+  - `POST /api/versions/switch/:id` — faz checkout git, rebuild e restart
+- **Changelog persistido:** `versions/changelog.json`
+- **Snapshots Git:** cada versão é um git tag
 
-### 5. Acesso via meshnet
-- **URL:** http://100.96.178.158:3000
-- **Health check:** http://100.96.178.158:3000/api/health
-- **Testado:** acessível e funcional
+### 5. Auto-Improvement Cron Job (NOVO)
+- **Job ID:** `40ae76fa9399`
+- **Agenda:** a cada 2 horas
+- **Próxima execução:** 2026-07-08 10:35 JST
+- **Skill:** `examtopics-portal-improvements`
+- **Workdir:** `/root/examtopics-4all`
+- **Funcionamento:** o agente LLM lê o changelog, escolhe uma melhoria não implementada, modifica o código fonte, regista a versão, faz build e restart
+- **15 ideias de melhoria** pré-definidas no `scripts/auto-improve.py`
 
 ---
 
 ## 📋 Configuração atual
+
+### Versões
+| Versão | Data | Título | Ativa |
+|--------|------|--------|-------|
+| v2.0.0 | 08/07/2026 | Version Tracking System | ✅ |
+| v1.0.0 | 08/07/2026 | Versão Inicial | ❌ |
 
 ### Ficheiro `.env`
 ```env
@@ -67,90 +52,36 @@ NODE_ENV=production
 PORT=3000
 ```
 
-### Dependências instaladas
-- **Total:** 180 packages (37 removidas após limpeza Gemini)
-- **Principais:** express, vite, react, tailwindcss, typescript, esbuild
-- **Sem** `@google/genai` ou `dotenv`
-
-### Scripts `package.json`
-- `npm run dev`: servidor de desenvolvimento (tsx server.ts)
-- `npm run build`: build de produção (vite build + esbuild server.ts)
-- `npm start`: inicia servidor de produção (node dist/server.cjs)
+### Acesso
+- **URL:** http://100.96.178.158:3000
+- **Health:** http://100.96.178.158:3000/api/health
 
 ---
 
 ## 🚀 Comandos úteis
 
-### Gerir o serviço
 ```bash
-# Ver estado
+# Ver estado do serviço
 sudo systemctl status examtopics-4all.service
 
 # Ver logs
 sudo journalctl -u examtopics-4all.service -f
 
-# Reiniciar
-sudo systemctl restart examtopics-4all.service
+# Ver todas as versões
+curl http://100.96.178.158:3000/api/versions
 
-# Parar
-sudo systemctl stop examtopics-4all.service
+# Listar cron jobs
+hermes cron list
 
-# Iniciar
-sudo systemctl start examtopics-4all.service
-```
-
-### Desenvolvimento local
-```bash
-cd /root/examtopics-4all
-npm install
-npm run dev  # inicia em modo desenvolvimento (porta 3000)
-```
-
-### Testar acesso
-```bash
-# Local
-curl http://localhost:3000/api/health
-
-# Via meshnet
-curl http://100.96.178.158:3000/api/health
+# Ver logs do cron job
+cronjob action=list
 ```
 
 ---
 
-## 📝 Notas para próxima sessão
+## 📝 Notas
 
-1. **Funcionalidades atuais:**
-   - Lista de vendors IT (estática em `/api/examtopics-vendors`)
-   - Simulador de exames (practice mode, exam mode, flashcards)
-   - Discussion board por questão
-   - Bookmark de questões
-   - Histórico de exames (local)
-
-2. **O que NÃO foi implementado (nem removido):**
-   - Funcionalidade de scrape de exames do ExamTopics (referências no código original, mas não integradas)
-   - Autenticação ou base de dados externa (tudo local/em memória)
-
-3. **Possíveis próximos passos:**
-   - [ ] Integrar scrape real do ExamTopics (sem Gemini, pode ser via cheeriox ou similar)
-   - [ ] Adicionar base de dados para persistência (SQLite?)
-   - [ ] Melhorar UI/UX do simulador
-   - [ ] Adicionar mais vendors/exames à lista estática
-   - [ ] Implementar funcionalidade de import de exames (se necessário)
-
-4. **Problemas conhecidos:**
-   - Nenhum reportado até ao momento
-   - Servidor testado e funcional
-
----
-
-## 🔗 Links úteis
-
-- **Repo GitHub:** https://github.com/TinocoAI/examtopics-4all
-- **Local:** `/root/examtopics-4all`
-- **Serviço systemd:** `/etc/systemd/system/examtopics-4all.service`
-- **Logs:** `sudo journalctl -u examtopics-4all.service`
-
----
-
-**Última atualização:** 7 de julho de 2026, 23:45 JST  
-**Por:** Hermes Agent (Tinoco)
+1. **Versions Picker:** acessível pela tab "Versions" no header do portal
+2. **Auto-Improvement Job:** implementa uma melhoria a cada 2h de forma autónoma
+3. **Switch entre versões:** na tab Versions, clica em "Switch to vX.X" — faz checkout git, rebuild e restart
+4. **Snapshots:** o git guarda tags de cada versão para rollback manual se necessário
