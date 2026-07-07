@@ -1,314 +1,219 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * ExamTopics 4All - Server
+ * Serves static frontend + API routes with static vendor/exam data
  */
 
 import express from "express";
-import path from "path";
+import path, { join } from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
-import dotenv from "dotenv";
+import { spawn, execFile } from "child_process";
+import { promisify } from "util";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 
-dotenv.config();
-
-// Shared Gemini Client, lazily initialized
-let aiClient: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY environment variable is not configured. Please add it in the Secrets panel.");
-    }
-    aiClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  }
-  return aiClient;
-}
+const execFileAsync = promisify(execFile);
+const SCRIPTS_DIR = join(process.cwd(), 'scripts');
+const VERSIONS_DIR = join(process.cwd(), 'versions');
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
-
-  // Body parser
-  app.use(express.json());
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "healthy", timestamp: new Date().toISOString() });
   });
 
-  // List all available IT vendors on ExamTopics
-  app.get("/api/examtopics-vendors", (req, res) => {
-    const vendors = [
-      { id: "amazon", name: "Amazon", icon: "☁️", color: "bg-amber-500", category: "Cloud" },
-      { id: "microsoft", name: "Microsoft", icon: "💠", color: "bg-blue-600", category: "Cloud & OS" },
-      { id: "google", name: "Google", icon: "⚡", color: "bg-emerald-500", category: "Cloud" },
-      { id: "cisco", name: "Cisco", icon: "🌐", color: "bg-indigo-500", category: "Networking" },
-      { id: "comptia", name: "CompTIA", icon: "🛠️", color: "bg-emerald-600", category: "Foundational" },
-      { id: "salesforce", name: "Salesforce", icon: "☁️", color: "bg-sky-400", category: "CRM / SaaS" },
-      { id: "vmware", name: "VMware", icon: "🖥️", color: "bg-teal-600", category: "Virtualization" },
-      { id: "oracle", name: "Oracle", icon: "📊", color: "bg-red-600", category: "Database & Cloud" },
-      { id: "redhat", name: "RedHat", icon: "🎩", color: "bg-red-700", category: "Linux / Devops" },
-      { id: "hashicorp", name: "HashiCorp", icon: "🔑", color: "bg-violet-600", category: "DevOps" },
-      { id: "linuxfoundation", name: "Linux Foundation", icon: "🐧", color: "bg-zinc-800", category: "Linux & Kubernetes" },
-      { id: "pmi", name: "PMI", icon: "📈", color: "bg-pink-600", category: "Project Management" },
-      { id: "isaca", name: "ISACA", icon: "🛡️", color: "bg-cyan-700", category: "Security / Audit" },
-      { id: "isc2", name: "ISC2", icon: "🔐", color: "bg-yellow-600", category: "Cybersecurity" },
-      { id: "paloalto", name: "Palo Alto Networks", icon: "🧱", color: "bg-orange-600", category: "Security" },
-      { id: "fortinet", name: "Fortinet", icon: "🛡️", color: "bg-rose-600", category: "Security" },
-      { id: "splunk", name: "Splunk", icon: "🖤", color: "bg-zinc-900", category: "Monitoring" },
-      { id: "snowflake", name: "Snowflake", icon: "❄️", color: "bg-cyan-400", category: "Data Warehouse" },
-      { id: "docker", name: "Docker", icon: "🐳", color: "bg-blue-400", category: "Containers" },
-      { id: "atlassian", name: "Atlassian", icon: "🎯", color: "bg-blue-500", category: "Agile / Collab" },
-      { id: "nutanix", name: "Nutanix", icon: "🟢", color: "bg-green-700", category: "Virtualization" },
-      { id: "f5", name: "F5 Networks", icon: "🔴", color: "bg-red-500", category: "Networking" },
-      { id: "citrix", name: "Citrix", icon: "💻", color: "bg-blue-700", category: "Virtualization" },
-      { id: "scrumorg", name: "Scrum.org", icon: "🏉", color: "bg-indigo-600", category: "Agile" }
-    ];
-    res.json({ vendors });
+  // List all available IT vendors on ExamTopics (static)
+  app.get("/api/examtopics-vendors", async (req, res) => {
+    try {
+      const vendors = getStaticVendors();
+      res.json({ vendors });
+    } catch (err: any) {
+      console.error("Error loading vendors:", err.message);
+      res.status(500).json({ error: "Failed to load vendors" });
+    }
   });
 
-  // Get all exams for a specific vendor from ExamTopics using Gemini AI to scrape/fetch actual active certifications
+  // Scrape exams for a specific vendor
   app.get("/api/examtopics-exams", async (req, res) => {
+    const vendor = req.query.vendor as string;
+    if (!vendor) {
+      return res.status(400).json({ error: "Vendor parameter is required" });
+    }
+
     try {
-      const { vendor } = req.query;
-      if (!vendor) {
-        return res.status(400).json({ error: "Missing required query parameter: vendor" });
+      // Try real scraping first (v2 - improved)
+      console.log(`[API] Scraping exams for vendor: ${vendor}`);
+      const exams = await runScraperScript('scrape-exams-v2.js', vendor);
+      
+      if (exams && exams.length > 0) {
+        console.log(`[API] Found ${exams.length} exams via scraping`);
+        return res.json({ exams });
       }
-
-      const client = getGeminiClient();
-      const prompt = `You are an expert IT certification training system and web scraper.
-List the 6 to 10 most popular, actual, active IT certification exams for the vendor: "${vendor}" that are currently featured on ExamTopics.
-Provide accurate exam codes (e.g. SAA-C03, AZ-104, 200-301, CKA) and the real names of the certifications.
-Ensure that each returned exam has a typical question count representing the active prep set on ExamTopics (e.g., 65 to 450).
-Give a clear, informative 1-sentence description detailing the core domains tested in the exam.`;
-
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: "You are a professional web scraping assistant. Output a valid, clean JSON array matching the requested schema.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            description: "List of real certification exams on ExamTopics for this vendor",
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                code: { type: Type.STRING, description: "Official exam code, e.g. SAA-C03, AZ-104, 200-301, CKA" },
-                name: { type: Type.STRING, description: "Official name of the exam" },
-                questionsCount: { type: Type.INTEGER, description: "Typical number of practice questions on ExamTopics, e.g. 120" },
-                description: { type: Type.STRING, description: "One-sentence overview of the certification" }
-              },
-              required: ["code", "name", "questionsCount", "description"]
-            }
-          }
-        }
-      });
-
-      const text = response.text;
-      if (!text) {
-        throw new Error("Failed to retrieve exams list from scraper.");
-      }
-
-      const exams = JSON.parse(text);
+      
+      // Fallback to static data if scraping returned empty
+      console.log(`[API] Scraping returned empty, trying static data...`);
+      const staticExams = getStaticExamsForVendor(vendor);
+      res.json({ exams: staticExams });
+      
+    } catch (err: any) {
+      console.error('[API] Error scraping exams:', err.message);
+      // Final fallback to static data
+      const exams = getStaticExamsForVendor(vendor);
       res.json({ exams });
-    } catch (error: any) {
-      console.error("Fetch ExamTopics Exams Error:", error);
-      res.status(500).json({ 
-        error: error.message || "An internal error occurred while scraping exams list." 
-      });
     }
   });
 
-  // Scrape / Download Exam Endpoint
-  app.post("/api/scrape-exam", async (req, res) => {
+  // Execute scraper to download exam questions (REAL scraping using examtopics-scraper)
+  app.post("/api/scrape-exam", express.json(), async (req, res) => {
+    const { provider, examCode, examName, count, startNumber } = req.body;
+
+    if (!provider || !examCode) {
+      return res.status(400).json({ error: "Provider and examCode are required" });
+    }
+
     try {
-      const { provider, examCode, examName } = req.body;
-      const count = Math.min(20, Math.max(1, parseInt(req.body.count as string) || 10)); // Limit single batch to max 20 to prevent Gemini token limit truncation
-      const startNumber = Math.max(1, parseInt(req.body.startNumber as string) || 1);
-
-      if (!provider || !examCode || !examName) {
-        return res.status(400).json({ error: "Missing required fields: provider, examCode, examName" });
-      }
-
-      const client = getGeminiClient();
-
-      const prompt = `You are an expert IT certification training system and automated examtopics web scraper.
-Your objective is to scrape, parse, and generate exactly ${count} highly realistic, high-quality, technically precise exam prep questions for:
-Provider: ${provider}
-Exam Code: ${examCode}
-Exam Name: ${examName}
-
-Start numbering the questions from question number ${startNumber} sequentially up to ${startNumber + count - 1}.
-Ensure:
-- Questions reflect the exact style, wording, scenarios, and difficulty of the real ExamTopics certifications.
-- Include architectural scenario questions, configuration scenarios, or troubleshooting.
-- Each question must have exactly 4 choices prefixed with 'A.', 'B.', 'C.', 'D.' respectively.
-- Define a clear, official correct answer choice letter (e.g., ["A"] or ["B", "D"]).
-- Provide a community answer (e.g., "A" or "Most voted: B") and a communityVotes distribution summing up to 100 (e.g. {"A": 85, "B": 15}).
-- Include a lively, informative community discussion thread with exactly 2 comments. The comments should argue back and forth technically using actual vendor service rules, explanations, or gotchas.
-
-Return the output strictly in the requested JSON structure.`;
-
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: "You are a professional web scraping robot that extracts clean JSON structures of IT certification exams.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            description: `Array of exactly ${count} high-quality certification questions starting at question ${startNumber}`,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                number: { type: Type.INTEGER, description: "Question number (sequential, e.g. 1, 2, 3...)" },
-                text: { type: Type.STRING, description: "Full scenario question body text" },
-                options: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "Exactly 4 options, each prefixed with its option letter, e.g. 'A. Create an IAM policy...', 'B. ...'"
-                },
-                correctAnswer: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "List of correct option letters, e.g., ['B']"
-                },
-                communityAnswer: { type: Type.STRING, description: "Community selected consensus, e.g. 'B'" },
-                communityVotes: {
-                  type: Type.OBJECT,
-                  properties: {
-                    A: { type: Type.INTEGER },
-                    B: { type: Type.INTEGER },
-                    C: { type: Type.INTEGER },
-                    D: { type: Type.INTEGER }
-                  },
-                  description: "Object containing vote distribution percentages"
-                },
-                discussion: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      username: { type: Type.STRING, description: "Lively username, e.g., cloudExpert99" },
-                      date: { type: Type.STRING, description: "Time elapsed, e.g., '2 months ago'" },
-                      vote: { type: Type.STRING, description: "Option letter voted for, e.g., 'B'" },
-                      content: { type: Type.STRING, description: "Lively, highly technical comment arguing why they chose that option" },
-                      upvotes: { type: Type.INTEGER, description: "Number of upvotes this comment received" }
-                    },
-                    required: ["username", "date", "vote", "content", "upvotes"]
-                  }
-                }
-              },
-              required: ["number", "text", "options", "correctAnswer", "communityAnswer", "communityVotes", "discussion"]
-            }
-          }
-        }
+      // Normalize provider: "Check Point" → "checkpoint", "Amazon Web Services" → "amazon"
+      const normalizedProvider = provider.toLowerCase()
+        .replace(/\s+/g, '') // Remove spaces
+        .replace(/[^a-z0-9]/g, ''); // Remove special chars
+      
+      console.log(`[API] Scraping REAL questions for ${provider} (=${normalizedProvider}) ${examCode} (count=${count}, start=${startNumber})`);
+      
+      // Spawn Python script with the real scraper (v2 with caching)
+      // Use venv Python directly to ensure dependencies (tqdm, etc.) are available
+      const venvPython = join('/root/examtopics-scraper/.venv/bin/python3');
+      const pythonExe = require('fs').existsSync(venvPython) ? venvPython : 'python3';
+      
+      const scriptPath = join(SCRIPTS_DIR, 'scrape-exam-questions-v2.py');
+      const args = [
+        scriptPath,
+        normalizedProvider, // Use normalized provider slug
+        examCode,
+        (count || 10).toString(),
+        (startNumber || 1).toString()
+      ];
+      
+      console.log(`[API] Running: ${pythonExe} ${args.join(' ')}`);
+      
+      const { stdout, stderr } = await execFileAsync(pythonExe, args, {
+        cwd: SCRIPTS_DIR
+        // NO timeout - let it run as long as needed!
       });
-
-      const text = response.text;
-      if (!text) {
-        throw new Error("No certification questions could be scraped or generated.");
+      
+      if (stderr) {
+        console.error(`[API] Scraper stderr: ${stderr}`);
       }
-
-      const questionsData = JSON.parse(text);
-
-      // Map to conform exactly with the frontend Question type
-      const mappedQuestions = questionsData.map((q: any, idx: number) => {
-        const qNum = q.number || (idx + 1);
-        const prefix = examCode.toLowerCase().replace(/[^a-z0-9]/g, "");
-        return {
-          id: `${prefix}-q${qNum}-${Math.random().toString(36).substring(2, 7)}`,
-          number: qNum,
-          text: q.text,
-          options: q.options,
-          correctAnswer: q.correctAnswer,
-          communityAnswer: q.communityAnswer,
-          communityVotes: q.communityVotes,
-          discussion: q.discussion?.map((comment: any, cIdx: number) => ({
-            id: `${prefix}-q${qNum}-c${cIdx}`,
-            username: comment.username,
-            date: comment.date,
-            vote: comment.vote,
-            content: comment.content,
-            upvotes: comment.upvotes || 0
-          }))
-        };
-      });
-
+      
+      // Parse stdout (should be JSON array of questions)
+      let questions;
+      try {
+        questions = JSON.parse(stdout);
+      } catch (parseErr) {
+        throw new Error(`Failed to parse scraper output: ${stdout.substring(0, 200)}`);
+      }
+      
+      if (!Array.isArray(questions)) {
+        throw new Error(`Scraper returned invalid data (not an array): ${stdout.substring(0, 200)}`);
+      }
+      
+      // If no questions returned, this is end of exam (not an error!)
+      if (questions.length === 0) {
+        console.log(`[API] No more questions available (end of exam reached)`);
+        return res.json({ 
+          exam: null, 
+          endOfExam: true,
+          message: "No more questions available - end of exam reached"
+        });
+      }
+      
       const exam = {
-        id: `downloaded-${examCode.toLowerCase().replace(/[^a-z0-9]/g, "")}-${Date.now()}`,
-        name: examName,
+        id: `downloaded-${examCode.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Date.now()}`,
+        name: examName || `${provider} ${examCode}`,
         code: examCode.toUpperCase(),
-        provider,
-        questions: mappedQuestions,
-        isImported: true // Treated as imported so it can be managed/deleted
+        provider: provider,
+        questions: questions,
+        isImported: true
       };
-
+      
+      console.log(`[API] Successfully scraped ${questions.length} questions!`);
       res.json({ exam });
-    } catch (error: any) {
-      console.error("Scraper API Error:", error);
-      res.status(500).json({ 
-        error: error.message || "An internal error occurred while scraping the exam certification." 
-      });
+      
+    } catch (err: any) {
+      console.error('[API] Error scraping questions:', err.message);
+      res.status(500).json({ error: err.message || "Scraper failed" });
     }
   });
 
-  // Gemini Explanation Endpoint
-  app.post("/api/explain", async (req, res) => {
+  // ==== Version Management API ====
+
+  // Get version history
+  app.get("/api/versions", (req, res) => {
+    const manifestPath = join(VERSIONS_DIR, 'changelog.json');
+    if (!existsSync(manifestPath)) {
+      return res.json({ versions: [], total_improvements: 0 });
+    }
     try {
-      const { questionText, options, correctAnswer, communityAnswer, communityVotes } = req.body;
+      const raw = readFileSync(manifestPath, 'utf-8');
+      const manifest = JSON.parse(raw);
+      res.json(manifest);
+    } catch (err: any) {
+      console.error('[API] Error reading version manifest:', err.message);
+      res.status(500).json({ error: "Failed to read version manifest" });
+    }
+  });
 
-      if (!questionText || !options || !correctAnswer) {
-        return res.status(400).json({ error: "Missing required fields: questionText, options, correctAnswer" });
-      }
+  // Switch to a specific version
+  app.post("/api/versions/switch/:versionId", async (req, res) => {
+    const { versionId } = req.params;
+    
+    // Read manifest to verify version exists
+    const manifestPath = join(VERSIONS_DIR, 'changelog.json');
+    let manifest: any;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+    } catch {
+      return res.status(500).json({ success: false, error: "Cannot read version manifest" });
+    }
 
-      const client = getGeminiClient();
+    const version = manifest.versions.find((v: any) => v.id === versionId);
+    if (!version) {
+      return res.status(404).json({ success: false, error: `Version ${versionId} not found` });
+    }
 
-      const prompt = `You are an expert IT certification trainer (for AWS, Google Cloud, Azure, etc.). Your goal is to provide a highly informative, professional, and clear explanation for the following exam question.
+    console.log(`[API] Switching to version: ${versionId} (git tag: ${version.git_tag})`);
 
-### Question:
-${questionText}
-
-### Options:
-${options.map((opt: string) => `- ${opt}`).join('\n')}
-
-### Correct Answer:
-${correctAnswer.join(', ')}
-
-${communityAnswer ? `### Community Discussion Details:\n- Community Selected Answer: ${communityAnswer}` : ''}
-${communityVotes ? `- Community Voting: ${JSON.stringify(communityVotes)}` : ''}
-
-Provide a comprehensive explanation structured in Markdown with the following sections:
-
-1. **Verify Official Answer**: Start with a direct statement verifying the official correct choice.
-2. **Why It Is Correct**: A detailed explanation of why the correct option is the optimal architectural or technical choice.
-3. **Why Other Options Are Incorrect**: Go through each incorrect option and explain exactly why it is suboptimal, invalid, or technically incorrect.
-4. **Arbiter on Community Debate** (ONLY if community votes or answers are mentioned above): Assess if there is a conflict between the official answer and the community votes. Act as an expert arbitrator. Explain which answer is technically correct and why there might be confusion (e.g. outdated AWS questions, ambiguous phrasing).
-5. **Key Exam Takeaways**: 2-3 quick bullet points summarizing the core service rules or concepts tested here that candidates should memorize.
-
-Be technical yet accessible. Use neat spacing and clear headings.`;
-
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
+    try {
+      // Git checkout to the tagged version
+      const { stdout, stderr } = await execFileAsync('git', ['checkout', version.git_tag, '-f'], {
+        cwd: process.cwd(),
+        timeout: 30000
       });
+      console.log(`[API] Git checkout output: ${stdout}`);
+      if (stderr) console.error(`[API] Git checkout stderr: ${stderr}`);
 
-      const explanation = response.text || "No explanation could be generated by the model.";
-      res.json({ explanation });
-    } catch (error: any) {
-      console.error("Gemini API Error:", error);
-      res.status(500).json({ 
-        error: error.message || "An internal error occurred while generating the explanation." 
-      });
+      // Update changelog to mark this version as current
+      manifest.versions.forEach((v: any) => v.is_current = (v.id === versionId));
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+      // Schedule restart (respond first, then restart)
+      res.json({ success: true, message: `Switching to ${versionId}. Server restarting...` });
+
+      // Rebuild and restart after responding
+      setTimeout(async () => {
+        try {
+          console.log(`[API] Rebuilding for version ${versionId}...`);
+          await execFileAsync('npm', ['run', 'build'], { cwd: process.cwd(), timeout: 120000 });
+          console.log(`[API] Build complete. Restarting service...`);
+          await execFileAsync('systemctl', ['restart', 'examtopics-4all']);
+        } catch (err: any) {
+          console.error(`[API] Failed to rebuild/restart for version ${versionId}:`, err.message);
+        }
+      }, 1000);
+
+    } catch (err: any) {
+      console.error(`[API] Failed to switch to version ${versionId}:`, err.message);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -322,18 +227,164 @@ Be technical yet accessible. Use neat spacing and clear headings.`;
     app.use(vite.middlewares);
   } else {
     console.log("Starting server in PRODUCTION mode with static file assets...");
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+  app.listen(PORT, "100.96.178.158", () => {
+    console.log(`Server is running on http://100.96.178.158:${PORT}`);
   });
 }
 
+// Helper function to run scraper scripts
+function runScraperScript(scriptName: string, ...args: string[]): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const scriptPath = join(SCRIPTS_DIR, scriptName);
+    const child = spawn('node', [scriptPath, ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: process.cwd()
+    });
+
+    let output = '';
+    let errorOutput = '';
+
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Scraper failed: ${errorOutput}`));
+        return;
+      }
+      try {
+        const result = JSON.parse(output);
+        resolve(result);
+      } catch (e) {
+        resolve(output.trim());
+      }
+    });
+  });
+}
+
+// Static vendor list
+function getStaticVendors() {
+  return [
+    { id: "amazon", name: "Amazon", icon: "☁️", color: "bg-amber-500", category: "Cloud" },
+    { id: "microsoft", name: "Microsoft", icon: "💠", color: "bg-blue-600", category: "Cloud & OS" },
+    { id: "google", name: "Google", icon: "⚡", color: "bg-emerald-500", category: "Cloud" },
+    { id: "cisco", name: "Cisco", icon: "🌐", color: "bg-indigo-500", category: "Networking" },
+    { id: "comptia", name: "CompTIA", icon: "🛠️", color: "bg-emerald-600", category: "Foundational" },
+    { id: "checkpoint", name: "Check Point", icon: "🔐", color: "bg-red-600", category: "Security" },
+    { id: "aruba", name: "Aruba", icon: "📡", color: "bg-blue-500", category: "Networking" },
+  ];
+}
+
+// Static exam lists for known vendors
+function getStaticExamsForVendor(vendor: string) {
+  const vendorLower = vendor.toLowerCase().trim();  
+  // Amazon / AWS
+  if (vendorLower.includes('amazon') || vendorLower.includes('aws') || vendorLower === 'amazon') {
+    return [
+      { code: 'SAA-C03', name: 'AWS Certified Solutions Architect - Associate', questionsCount: 65, description: 'AWS SAA-C03 certification exam' },
+      { code: 'DVA-C02', name: 'AWS Certified Developer - Associate', questionsCount: 65, description: 'AWS DVA-C02 certification exam' },
+      { code: 'SOA-C02', name: 'AWS Certified SysOps Administrator - Associate', questionsCount: 65, description: 'AWS SOA-C02 certification exam' },
+      { code: 'SAP-C02', name: 'AWS Certified Solutions Architect - Professional', questionsCount: 75, description: 'AWS SAP-C02 certification exam' },
+      { code: 'DOP-C02', name: 'AWS Certified DevOps Engineer - Professional', questionsCount: 75, description: 'AWS DOP-C02 certification exam' },
+      { code: 'AIF-C01', name: 'AWS Certified AI Practitioner', questionsCount: 50, description: 'AWS AIF-C01 certification exam' },
+      { code: 'CLF-C02', name: 'AWS Certified Cloud Practitioner', questionsCount: 50, description: 'AWS CLF-C02 certification exam' },
+    ];
+  }
+  // Microsoft / Azure
+  if (vendorLower.includes('microsoft') || vendorLower.includes('azure') || vendorLower === 'microsoft') {
+    return [
+      { code: 'AZ-104', name: 'Microsoft Azure Administrator', questionsCount: 50, description: 'Azure Administrator exam' },
+      { code: 'AZ-204', name: 'Microsoft Azure Developer Associate', questionsCount: 50, description: 'Azure Developer exam' },
+      { code: 'AZ-305', name: 'Microsoft Azure Solutions Architect Expert', questionsCount: 50, description: 'Azure Architect exam' },
+      { code: 'AZ-500', name: 'Microsoft Azure Security Technologies', questionsCount: 50, description: 'Azure Security exam' },
+      { code: 'MS-900', name: 'Microsoft 365 Fundamentals', questionsCount: 50, description: 'M365 Fundamentals exam' },
+    ];
+  }
+  // Google / GCP
+  if (vendorLower.includes('google') || vendorLower.includes('gcp') || vendorLower === 'google') {
+    return [
+      { code: 'Professional-Cloud-Architect', name: 'Google Cloud Professional Cloud Architect', questionsCount: 50, description: 'GCP Architect exam' },
+      { code: 'Associate-Cloud-Engineer', name: 'Google Cloud Associate Cloud Engineer', questionsCount: 50, description: 'GCP Engineer exam' },
+      { code: 'Professional-Data-Engineer', name: 'Google Cloud Professional Data Engineer', questionsCount: 50, description: 'GCP Data exam' },
+    ];
+  }
+  // Cisco
+  if (vendorLower.includes('cisco') || vendorLower === 'cisco') {
+    return [
+      { code: '200-301', name: 'Cisco Certified Network Associate (CCNA)', questionsCount: 120, description: 'CCNA exam' },
+      { code: '350-401', name: 'Implementing Cisco Enterprise Network Core Technologies (ENCOR)', questionsCount: 90, description: 'CCNP Core exam' },
+      { code: '300-410', name: 'Implementing Cisco Enterprise Advanced Routing and Services (ENARSI)', questionsCount: 60, description: 'CCNP ENARSI exam' },
+    ];
+  }
+  // CompTIA
+  if (vendorLower.includes('comptia') || vendorLower === 'comptia') {
+    return [
+      { code: 'SY0-701', name: 'CompTIA Security+', questionsCount: 90, description: 'Security+ exam' },
+      { code: 'N10-008', name: 'CompTIA Network+', questionsCount: 90, description: 'Network+ exam' },
+      { code: 'A+', name: 'CompTIA A+ Core 1 & 2', questionsCount: 90, description: 'A+ exam' },
+    ];
+  }
+  // Check Point
+  if ((vendorLower.includes('check') && vendorLower.includes('point')) || vendorLower === 'checkpoint') {
+    return [
+      { code: '156-315.81', name: 'Check Point Certified Security Expert (CCSE) R81', questionsCount: 100, description: 'CCSE R81 exam' },
+      { code: '156-215.81', name: 'Check Point Certified Security Administrator (CCSA) R81', questionsCount: 90, description: 'CCSA R81 exam' },
+      { code: '156-110', name: 'Check Point Certified Security Principles Associate (CCSPA)', questionsCount: 80, description: 'CCSPA exam' },
+    ];
+  }
+  // Aruba
+  if (vendorLower.includes('aruba') || vendorLower === 'aruba') {
+    return [
+      { code: 'ACCP-v6.2', name: 'Aruba Certified ClearPass Professional', questionsCount: 60, description: 'ACCP exam' },
+      { code: 'ACMP_6.4', name: 'Aruba Certified Mobility Professional', questionsCount: 75, description: 'ACMP exam' },
+    ];
+  }
+  // Unknown vendor - return empty array
+  return [];
+}
+
+// Generate mock questions for testing
+function generateMockQuestions(count: number) {
+  const questions = [];
+  for (let i = 1; i <= count; i++) {
+    questions.push({
+      id: `q-${i}`,
+      number: i,
+      text: `This is question ${i} about ${Math.random().toString(36).substring(7)}...`,
+      options: [
+        `A. Option A for question ${i}`,
+        `B. Option B for question ${i}`,
+        `C. Option C for question ${i}`,
+        `D. Option D for question ${i}`
+      ],
+      correctAnswer: ['A'],
+      communityAnswer: 'A',
+      communityVotes: { 'A': Math.floor(Math.random() * 100) },
+      discussions: [
+        {
+          username: 'User' + Math.floor(Math.random() * 1000),
+          date: '2 months ago',
+          vote: 'A',
+          content: 'I think the answer is A because...'
+        }
+      ]
+    });
+  }
+  return questions;
+}
+
 startServer().catch((err) => {
-  console.error("Failed to start fullstack server:", err);
+  console.error("Failed to start server:", err);
 });

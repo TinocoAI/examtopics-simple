@@ -4,7 +4,7 @@
  */
 
 import { Exam, PracticeHistory } from "../types";
-import { BookOpen, Trophy, Clock, CheckCircle, BarChart3, Trash2, Layers, Tag, Bookmark } from "lucide-react";
+import { BookOpen, Trophy, Clock, CheckCircle, BarChart3, Trash2, Layers, Tag, Bookmark, FileDown } from "lucide-react";
 
 interface DashboardProps {
   exams: Exam[];
@@ -36,10 +36,34 @@ export default function Dashboard({
     : 0;
     
   const totalTimeSec = history.reduce((sum, h) => sum + h.elapsedTime, 0);
-  const formattedTotalTime = totalTimeSec > 3600 
+  const formattedTotalTime = totalTimeSec > 3600
     ? `${Math.floor(totalTimeSec / 3600)}h ${Math.floor((totalTimeSec % 3600) / 60)}m`
     : `${Math.floor(totalTimeSec / 60)}m ${totalTimeSec % 60}s`;
-
+  
+  // Export exam to JSON file (download)
+  const handleExportExam = (exam: Exam) => {
+    try {
+      // Convert exam to JSON string with pretty formatting
+      const jsonStr = JSON.stringify(exam, null, 2);
+      
+      // Create blob and download link
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${exam.code.replace(/[^a-zA-Z0-9]/g, '_')}_${exam.provider.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      addLog?.(`Exported ${exam.code} to JSON file.`);
+    } catch (err: any) {
+      console.error('Export failed:', err);
+      alert('Failed to export exam: ' + err.message);
+    }
+  };
+  
   // Group bookmarks by exam for list display
   const bookmarkedQuestionsList = bookmarkedIds.map(bId => {
     // bId is format "examId-qId" or just "examId:qId"
@@ -191,6 +215,14 @@ export default function Dashboard({
                     id={`flash-btn-${exam.id}`}
                   >
                     Flashcards
+                  </button>
+                  <button
+                    onClick={() => handleExportExam(exam)}
+                    className="bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white border-2 border-black font-black uppercase text-xs tracking-wider py-2 px-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.15)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all flex items-center gap-1"
+                    id={`export-btn-${exam.id}`}
+                  >
+                    <FileDown size={14} />
+                    Export
                   </button>
                 </div>
               </div>

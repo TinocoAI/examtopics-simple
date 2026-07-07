@@ -6,8 +6,8 @@
 import { useState, useEffect, useRef } from "react";
 import { 
   ArrowLeft, ArrowRight, HelpCircle, Eye, CheckCircle2, XCircle, 
-  Clock, Award, BookOpen, Bookmark, MessageSquare, Sparkles, 
-  RotateCcw, Check, ListFilter, MessageCircle, RefreshCw, PenTool
+  Clock, Award, BookOpen, Bookmark, MessageSquare,
+  RotateCcw, Check, ListFilter, MessageCircle, PenTool
 } from "lucide-react";
 import { Exam, Question, Comment } from "../types";
 
@@ -49,11 +49,6 @@ export default function ExamSimulator({
   const [showDiscussion, setShowDiscussion] = useState(false);
   const [isFlipped, setIsFlipped] = useState(false); // Flashcard mode state
   
-  // AI explanation cache and loading state
-  const [aiExplanations, setAiExplanations] = useState<{ [qId: string]: string }>({});
-  const [loadingAi, setLoadingAi] = useState<string | null>(null); // holds qId when loading
-  const [aiError, setAiError] = useState<string | null>(null);
-
   // Local comments added by user during this session
   const [localComments, setLocalComments] = useState<{ [qId: string]: Comment[] }>({});
   const [commentInput, setCommentInput] = useState("");
@@ -82,7 +77,6 @@ export default function ExamSimulator({
   useEffect(() => {
     setIsFlipped(false);
     setShowDiscussion(false);
-    setAiError(null);
   }, [currentIdx]);
 
   const formatTime = (secs: number) => {
@@ -131,44 +125,6 @@ export default function ExamSimulator({
       ...prev,
       [currentQuestion.id]: true
     }));
-  };
-
-  // Get explanation from Gemini AI API
-  const handleGetAiExplanation = async () => {
-    if (aiExplanations[currentQuestion.id]) return; // already cached
-    
-    setLoadingAi(currentQuestion.id);
-    setAiError(null);
-
-    try {
-      const response = await fetch("/api/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionText: currentQuestion.text,
-          options: currentQuestion.options,
-          correctAnswer: currentQuestion.correctAnswer,
-          communityAnswer: currentQuestion.communityAnswer,
-          communityVotes: currentQuestion.communityVotes
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate AI explanation.");
-      }
-
-      const data = await response.json();
-      setAiExplanations(prev => ({
-        ...prev,
-        [currentQuestion.id]: data.explanation
-      }));
-    } catch (err: any) {
-      console.error(err);
-      setAiError(err.message || "Could not connect to Gemini AI explanation service. Please check your internet connection.");
-    } finally {
-      setLoadingAi(null);
-    }
   };
 
   // Upvote a comment
@@ -237,65 +193,6 @@ export default function ExamSimulator({
       return isAnswered ? 'answered' : 'unanswered';
     }
     return 'unanswered';
-  };
-
-  // Render a clean markdown simulator
-  const renderMarkdownExplanation = (md: string) => {
-    const lines = md.split('\n');
-    return lines.map((line, lIdx) => {
-      // Headers
-      if (line.startsWith('### ')) {
-        return <h4 key={lIdx} className="font-bold text-slate-800 dark:text-slate-100 text-sm mt-4 mb-2">{line.replace('### ', '')}</h4>;
-      }
-      if (line.startsWith('## ')) {
-        return <h3 key={lIdx} className="font-bold text-slate-800 dark:text-slate-100 text-base mt-5 mb-2.5 border-b border-slate-100 dark:border-slate-800 pb-1">{line.replace('## ', '')}</h3>;
-      }
-      if (line.startsWith('# ')) {
-        return <h2 key={lIdx} className="font-extrabold text-slate-950 dark:text-white text-lg mt-6 mb-3">{line.replace('# ', '')}</h2>;
-      }
-      if (line.startsWith('**') && line.endsWith('**')) {
-        return <p key={lIdx} className="font-bold text-slate-900 dark:text-white mt-2">{line.replace(/\*\*/g, '')}</p>;
-      }
-      
-      // List items
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        const boldMatch = line.match(/\*\*(.*?)\*\*/);
-        if (boldMatch) {
-          const prefix = line.substring(2, line.indexOf('**'));
-          const boldText = boldMatch[1];
-          const suffix = line.substring(line.indexOf('**') + boldText.length + 4);
-          return (
-            <li key={lIdx} className="text-xs text-slate-600 dark:text-slate-300 ml-4 list-disc mt-1.5 leading-relaxed">
-              {prefix}<strong>{boldText}</strong>{suffix}
-            </li>
-          );
-        }
-        return <li key={lIdx} className="text-xs text-slate-600 dark:text-slate-300 ml-4 list-disc mt-1.5 leading-relaxed">{line.substring(2)}</li>;
-      }
-
-      // Standard text with inline bolding
-      if (line.trim()) {
-        const boldRegex = /\*\*(.*?)\*\*/g;
-        let elements = [];
-        let lastIndex = 0;
-        let match;
-        
-        while ((match = boldRegex.exec(line)) !== null) {
-          if (match.index > lastIndex) {
-            elements.push(line.substring(lastIndex, match.index));
-          }
-          elements.push(<strong key={match.index} className="text-slate-900 dark:text-white font-semibold">{match[1]}</strong>);
-          lastIndex = boldRegex.lastIndex;
-        }
-        if (lastIndex < line.length) {
-          elements.push(line.substring(lastIndex));
-        }
-
-        return <p key={lIdx} className="text-xs text-slate-600 dark:text-slate-300 mt-2 leading-relaxed">{elements.length > 0 ? elements : line}</p>;
-      }
-
-      return <div key={lIdx} className="h-2" />;
-    });
   };
 
   const currentAnswers = userAnswers[currentQuestion.id] || [];
@@ -460,7 +357,7 @@ export default function ExamSimulator({
                   </div>
 
                   <p className="text-center text-black/50 dark:text-white/50 text-[10px] font-bold uppercase tracking-wider mt-6">
-                    Press &apos;Explain with Gemini&apos; or inspect &apos;Discussion Board&apos; below for explanations.
+                    Inspect the &apos;Discussion Board&apos; below for community explanations.
                   </p>
                 </div>
               )}
@@ -614,59 +511,6 @@ export default function ExamSimulator({
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* AI Explanation Tab (Practice Mode or Exam Reviewed Mode) */}
-        {((mode === 'practice' && currentChecked) || (mode === 'exam' && examSubmitted) || mode === 'flashcards') && (
-          <div className="bg-white dark:bg-zinc-900 border-2 border-black p-8 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.15)] space-y-4" id="ai-explainer-panel">
-            <div className="flex justify-between items-center pb-2 border-b-2 border-black dark:border-zinc-850">
-              <div className="flex items-center gap-2">
-                <Sparkles size={18} className="text-brand animate-pulse" />
-                <h3 className="font-black text-black dark:text-white text-xs uppercase tracking-wider">Gemini Training Assistant</h3>
-              </div>
-              {!aiExplanations[currentQuestion.id] && !loadingAi && (
-                <button
-                  onClick={handleGetAiExplanation}
-                  className="bg-brand text-white hover:bg-black font-black uppercase tracking-wider px-4 py-2 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-xs flex items-center gap-1.5 transition-colors"
-                  id="get-ai-explanation-btn"
-                >
-                  <Sparkles size={13} />
-                  Explain with Gemini AI
-                </button>
-              )}
-            </div>
-
-            {/* Explanations States */}
-            {loadingAi === currentQuestion.id && (
-              <div className="py-8 flex flex-col items-center justify-center gap-3 text-center" id="ai-loading-state">
-                <RefreshCw size={24} className="text-brand animate-spin" />
-                <div className="space-y-1">
-                  <p className="text-xs font-black uppercase tracking-tight">Consulting Certification Documents...</p>
-                  <p className="text-[10px] text-black/60 dark:text-white/60 font-bold leading-relaxed">Analyzing distractors and resolving community votes. This takes 2-3 seconds.</p>
-                </div>
-              </div>
-            )}
-
-            {aiError && (
-              <div className="p-4 bg-rose-500 text-white border-2 border-black font-black uppercase tracking-tight text-xs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]" id="ai-error-banner">
-                {aiError}
-              </div>
-            )}
-
-            {aiExplanations[currentQuestion.id] && (
-              <div className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-4" id="ai-explanation-content">
-                <div className="prose prose-sm max-w-none prose-slate dark:prose-invert font-semibold text-black dark:text-white">
-                  {renderMarkdownExplanation(aiExplanations[currentQuestion.id])}
-                </div>
-              </div>
-            )}
-
-            {!aiExplanations[currentQuestion.id] && !loadingAi && (
-              <p className="text-xs font-bold text-black/50 dark:text-white/50 leading-relaxed">
-                Need an in-depth breakdown? Click the button to have Google Gemini analyze this question, explain why each option is correct or incorrect, and resolve conflicting community votes instantly.
-              </p>
             )}
           </div>
         )}

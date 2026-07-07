@@ -7,7 +7,7 @@ import { useState, useEffect } from "react";
 import { 
   BookOpen, Terminal, FileJson, Sun, Moon, Info, ShieldAlert,
   ChevronRight, RefreshCw, BarChart2, Layers, Compass, HelpCircle,
-  CloudDownload
+  CloudDownload, GitBranch
 } from "lucide-react";
 import { Exam, PracticeHistory } from "./types";
 import { SAMPLE_EXAMS } from "./data/sampleExams";
@@ -18,10 +18,11 @@ import JsonImporter from "./components/JsonImporter";
 import ScraperGuide from "./components/ScraperGuide";
 import ExamSimulator from "./components/ExamSimulator";
 import ExamDownloader from "./components/ExamDownloader";
+import VersionPicker from "./components/VersionPicker";
 
 export default function App() {
   // Navigation & View tabs
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'importer' | 'guide' | 'downloader'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'importer' | 'guide' | 'downloader' | 'versions'>('dashboard');
   
   // Theme state
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -220,7 +221,7 @@ export default function App() {
                   ExamTopics <span className="text-brand">Simulator</span>
                 </h1>
                 <p className="text-black/50 dark:text-white/50 text-[10px] font-bold font-mono tracking-widest uppercase">
-                  Companion & Explainer
+                  Companion
                 </p>
               </div>
             </button>
@@ -258,6 +259,14 @@ export default function App() {
                 >
                   <Terminal size={13} />
                   Scraper Guide
+                </button>
+                <button
+                  onClick={() => setActiveTab('versions')}
+                  className={`px-4 py-2 text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === 'versions' ? 'bg-purple-600 text-white border border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]' : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'}`}
+                  id="tab-versions"
+                >
+                  <GitBranch size={13} />
+                  Versions
                 </button>
               </nav>
             )}
@@ -353,6 +362,12 @@ export default function App() {
               >
                 Guide
               </button>
+              <button 
+                onClick={() => setActiveTab('versions')}
+                className={`flex-1 py-2 text-center text-xs font-black uppercase ${activeTab === 'versions' ? 'bg-purple-600 text-white border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]' : 'text-slate-500'}`}
+              >
+                Versions
+              </button>
             </div>
 
             {activeTab === 'dashboard' && (
@@ -382,13 +397,17 @@ export default function App() {
             {activeTab === 'guide' && (
               <ScraperGuide />
             )}
+
+            {activeTab === 'versions' && (
+              <VersionPicker />
+            )}
           </div>
         )}
       </main>
 
       {/* Humble Footer */}
       <footer className="bg-white dark:bg-zinc-900 border-t-4 border-black dark:border-zinc-850 py-6 mt-12 text-center text-xs font-mono font-bold uppercase tracking-wider text-black dark:text-white" id="main-footer">
-        <p>© 2026 ExamTopics Companion & Practice Simulator • Powered by Gemini AI</p>
+        <p>© 2026 ExamTopics Companion & Practice Simulator</p>
       </footer>
 
     </div>

@@ -47,19 +47,22 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
   // Download count states
   const [requestedCount, setRequestedCount] = useState<number>(20);
   const [customCountValue, setCustomCountValue] = useState<string>("15");
-  const [countMode, setCountMode] = useState<'preset' | 'custom' | 'all'>('preset');
+  const [countMode, setCountMode] = useState<'preset' | 'custom'>('preset');
   
   // Filters and search
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  
+  // Dynamic search on ExamTopics
+  const [searchResults, setSearchResults] = useState<{ vendors: Vendor[], exams: any[] }>({ vendors: [], exams: [] });
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   // Custom form input state for the scraper
   const [provider, setProvider] = useState("");
   const [examCode, setExamCode] = useState("");
   const [examName, setExamName] = useState("");
   const [customMode, setCustomMode] = useState(false);
-  const [customExams, setCustomExams] = useState<ExamPreset[]>([]);
-  const [loadingCustomExams, setLoadingCustomExams] = useState(false);
 
   // Scraper execution logs & simulation state
   const [isScraping, setIsScraping] = useState(false);
@@ -105,7 +108,8 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
 
     try {
       setLoadingExams(true);
-      const res = await fetch(`/api/examtopics-exams?vendor=${encodeURIComponent(vendor.name)}`);
+      // Use vendor.id (lowercase, URL-friendly) for the API call
+      const res = await fetch(`/api/examtopics-exams?vendor=${encodeURIComponent(vendor.id)}`);
       if (!res.ok) {
         throw new Error("Scraper encountered an error compiling certification exams list.");
       }
@@ -155,18 +159,12 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
     let totalToScrape = 20;
     if (countMode === 'preset') {
       totalToScrape = requestedCount;
-    } else if (countMode === 'all') {
-      // "ALL" selecionado - fazer download de TODAS as perguntas disponíveis
-      // Limite razoável: 500 perguntas (se houver mais, o utilizador pode aumentar)
-      totalToScrape = 500;
-      addLog(`[ALL MODE] Will download ALL available questions (limited to 500)`);
-      await delay(500);
     } else {
       const parsed = parseInt(customCountValue);
       if (!isNaN(parsed) && parsed > 0) {
-        totalToScrape = parsed; // Sem limite - fazer download de TODAS as perguntas
+        totalToScrape = Math.min(80, Math.max(1, parsed));
       } else {
-        setError("Please specify a valid question count (minimum 1).");
+        setError("Please specify a valid custom question count (1 to 80).");
         return;
       }
     }
@@ -222,26 +220,14 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
         }
 
         const data = await response.json();
-        
-        // Check if this is end of exam (no more questions)
-        if (data.endOfExam) {
-          addLog(`-> Batch ${i + 1}/${numBatches}: No more questions (end of exam reached). Stopping download.`);
-          await delay(300);
-          // Break out of the loop - we've reached the end
-          i = numBatches; // Force loop to end
-          break;
-        }
-        
         const examBatch = data.exam;
-        
+
         if (examBatch && examBatch.questions && examBatch.questions.length > 0) {
           allQuestions = [...allQuestions, ...examBatch.questions];
           addLog(`-> Batch ${i + 1}/${numBatches} downloaded! Retrieved ${examBatch.questions.length} authentic ExamTopics Qs.`);
           await delay(300);
         } else {
-          // This shouldn't happen if endOfExam is handled above, but just in case
-          addLog(`-> Batch ${i + 1}/${numBatches}: Warning - empty batch, but not end of exam. Continuing...`);
-          await delay(300);
+          throw new Error(`Batch ${i + 1} returned empty questions payload.`);
         }
       }
 
@@ -277,6 +263,41 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
       setSuccessExam(null);
       setTerminalLogs([]);
     }
+  };
+
+  // Search ExamTopics dynamically
+  const handleSearchExamTopics = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    setShowSearchResults(true);
+    setSearchResults({ vendors: [], exams: [] });
+    
+    try {
+      addLog(`Searching ExamTopics for: "${searchQuery}"...`);
+      const res = await fetch(`/api/examtopics-search?q=${encodeURIComponent(searchQuery)}`);
+      
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data.results);
+        addLog(`Found ${data.results.vendors.length} vendors and ${data.results.exams.length} exams.`);
+      } else {
+        throw new Error("Search failed");
+      }
+    } catch (err: any) {
+      addLog(`Search error: ${err.message}`);
+      setSearchResults({ vendors: [], exams: [] });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Add dynamic vendor to list
+  const handleAddDynamicVendor = (vendor: Vendor) => {
+    setVendors(prev => [...prev, vendor]);
+    handleVendorSelect(vendor);
+    setShowSearchResults(false);
+    addLog(`Added dynamic vendor: ${vendor.name}`);
   };
 
   // Categories of vendors for quick-filtering
@@ -325,7 +346,7 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
               }}
               className={`px-3 py-1.5 border-2 border-black font-black uppercase tracking-wider text-xxs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all ${customMode ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-white text-black dark:bg-zinc-800 dark:text-white hover:bg-slate-100'}`}
             >
-              {customMode ? "Back to Presets" : "Custom Search"}
+              {customMode ? "Back to Presets" : "Enter Custom Code"}
             </button>
           </div>
 
@@ -378,14 +399,99 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
                     </button>
                   ))}
                   {filteredVendors.length === 0 && (
-                    <div className="col-span-full text-center py-8 text-xs text-slate-400 font-bold">
-                      No matching vendors found.
+                    <div className="col-span-full text-center py-8 space-y-3">
+                      <p className="text-xs text-slate-400 font-bold">
+                        No matching vendors found.
+                      </p>
+                      <button
+                        onClick={handleSearchExamTopics}
+                        disabled={isSearching || !searchQuery.trim()}
+                        className="px-4 py-2 bg-amber-400 text-black border-2 border-black font-black uppercase tracking-wider text-xxs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-amber-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+                      >
+                        {isSearching ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin" />
+                            Searching ExamTopics...
+                          </>
+                        ) : (
+                          <>
+                            <Search size={12} />
+                            🔍 Search ExamTopics
+                          </>
+                        )}
+                      </button>
                     </div>
                   )}
                 </div>
               )}
+              
+              {/* Dynamic Search Results from ExamTopics */}
+              {showSearchResults && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-dashed border-amber-400">
+                    <h4 className="font-black text-xs uppercase tracking-wider text-amber-600 flex items-center gap-1.5">
+                      <Search size={12} />
+                      ExamTopics Search Results
+                    </h4>
+                    <button
+                      onClick={() => setShowSearchResults(false)}
+                      className="text-[10px] font-bold text-slate-500 hover:text-black"
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                  
+                  {isSearching ? (
+                    <div className="text-center py-4">
+                      <Loader2 size={20} className="animate-spin mx-auto text-amber-500" />
+                      <p className="text-xxs text-slate-500 mt-2">Searching ExamTopics.com...</p>
+                    </div>
+                  ) : (
+                    <>
+                      {searchResults.vendors.length === 0 && searchResults.exams.length === 0 ? (
+                        <p className="text-xxs text-slate-400 text-center py-3">
+                          No results found on ExamTopics for "{searchQuery}"
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                          {searchResults.vendors.map((vendor: Vendor, idx: number) => (
+                            <div
+                              key={`search-vendor-${idx}`}
+                              className="flex items-center justify-between p-2 border border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg">{vendor.icon}</span>
+                                <span className="font-black text-xs">{vendor.name}</span>
+                                <span className="text-[9px] font-mono bg-amber-200 px-1.5 py-0.5">
+                                  {vendor.category}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => handleAddDynamicVendor(vendor)}
+                                className="px-2 py-1 bg-black text-white text-[9px] font-black uppercase tracking-wider border border-black hover:bg-zinc-800"
+                              >
+                                + Add Vendor
+                              </button>
+                            </div>
+                          ))}
+                          
+                          {searchResults.exams.length > 0 && (
+                            <div className="pt-2">
+                              <p className="text-[9px] font-bold text-slate-500 mb-1">Exams found:</p>
+                              {searchResults.exams.map((exam: any, idx: number) => (
+                                <div key={`search-exam-${idx}`} className="p-2 border border-dashed border-green-300 bg-green-50 dark:bg-green-950/20 text-xs">
+                                  <span className="font-bold">{exam.code}</span> - {exam.name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </>
-          )}
         </div>
 
         {/* Step 2: Selected Vendor's Exams List */}
@@ -458,23 +564,6 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
                   type="text"
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
-                  onBlur={async () => {
-                    // Auto-search when user leaves the field
-                    if (provider.trim()) {
-                      setLoadingCustomExams(true);
-                      try {
-                        const res = await fetch(`/api/examtopics-exams?vendor=${encodeURIComponent(provider)}`);
-                        if (res.ok) {
-                          const data = await res.json();
-                          setCustomExams(data.exams);
-                        }
-                      } catch (err) {
-                        console.error('Failed to fetch custom exams', err);
-                      } finally {
-                        setLoadingCustomExams(false);
-                      }
-                    }
-                  }}
                   placeholder="e.g. Amazon Web Services"
                   className="w-full bg-white dark:bg-zinc-900 border-2 border-black px-3 py-2 text-xs font-bold text-black dark:text-white focus:outline-none"
                 />
@@ -501,31 +590,6 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
                 className="w-full bg-white dark:bg-zinc-900 border-2 border-black px-3 py-2 text-xs font-bold text-black dark:text-white focus:outline-none"
               />
             </div>
-
-            {/* Show custom exam results */}
-            {loadingCustomExams && (
-              <div className="text-xs font-bold text-slate-500">Searching ExamTopics for {provider}...</div>
-            )}
-            {!loadingCustomExams && customExams.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Found {customExams.length} exam(s):</p>
-                <div className="max-h-40 overflow-y-auto space-y-1">
-                  {customExams.map((exam) => (
-                    <button
-                      key={exam.code}
-                      onClick={() => {
-                        setExamCode(exam.code);
-                        setExamName(exam.name);
-                        setProvider(provider);
-                      }}
-                      className="w-full text-left p-2 border border-black bg-white dark:bg-zinc-900 hover:bg-amber-50 dark:hover:bg-zinc-800 text-xs font-bold"
-                    >
-                      <span className="text-amber-600">{exam.code}</span> - {exam.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -555,16 +619,6 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
                 {size} Qs
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => {
-                setCountMode('all');
-                setRequestedCount(999999); // Um número grande para representar "todas"
-              }}
-              className={`border-2 border-black p-2.5 font-mono text-center font-black uppercase tracking-tight text-xs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.1)] transition-all ${countMode === 'all' ? 'bg-red-500 text-white border-double border-4' : 'bg-[#F9F9F9] dark:bg-zinc-950/40 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
-            >
-              ALL
-            </button>
           </div>
 
           <div className="flex items-center gap-3 pt-1">
@@ -580,12 +634,13 @@ export default function ExamDownloader({ onDownloadSuccess }: ExamDownloaderProp
                 <input
                   type="number"
                   min="1"
+                  max="80"
                   value={customCountValue}
                   onChange={(e) => setCustomCountValue(e.target.value)}
-                  placeholder="e.g. 100"
+                  placeholder="e.g. 15"
                   className="w-20 bg-[#F9F9F9] dark:bg-zinc-950 border-2 border-black px-2 py-1 text-xs font-bold focus:outline-none focus:ring-0 text-black dark:text-white"
                 />
-                <span className="text-xxs font-mono font-bold text-slate-500">(No limit - all available)</span>
+                <span className="text-xxs font-mono font-bold text-slate-500">(Max 80 Qs)</span>
               </div>
             )}
           </div>
