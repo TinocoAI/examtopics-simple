@@ -1,6 +1,24 @@
 {
   "versions": [
     {
+      "id": "v2.0.0",
+      "date": "2026-07-08T07:45:00Z",
+      "title": "Version Tracking System",
+      "description": "Adicionado sistema completo de gestão de versões com Version Picker UI, API de versionamento (listar/switch), changelog automático e snapshots git. Cada melhoria futura será registada como uma nova versão, permitindo navegar entre versões anteriores.",
+      "changes": [
+        "Version Picker UI — tab 'Versions' no header com histórico completo",
+        "Cada versão mostra data, título, descrição detalhada e lista de alterações",
+        "API /api/versions — lista o changelog completo",
+        "API POST /api/versions/switch/:id — faz checkout git, rebuild e restart do serviço",
+        "Versão activa destacada a verde com badge 'Active'",
+        "Confirmação antes de fazer switch de versão para evitar enganos",
+        "Changelog persistido em versions/changelog.json",
+        "Suporte mobile (tab 'Versions' na barra móvel)"
+      ],
+      "git_tag": "v2.0.0",
+      "is_current": true
+    },
+    {
       "id": "v1.0.0",
       "date": "2026-07-08T07:30:00Z",
       "title": "Versão Inicial",
@@ -16,8 +34,8 @@
         "Tema dark/light"
       ],
       "git_tag": "v1.0.0",
-      "is_current": true
+      "is_current": false
     }
   ],
-  "total_improvements": 0
+  "total_improvements": 1
 }
