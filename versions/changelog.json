@@ -1,0 +1,23 @@
+{
+  "versions": [
+    {
+      "id": "v1.0.0",
+      "date": "2026-07-08T07:30:00Z",
+      "title": "Versão Inicial",
+      "description": "Portal base com Dashboard, Download Exams, JSON Importer, Scraper Guide e Exam Simulator (practice, exam, flashcards). Scraping real de exames via Python. Tema dark/light. Bookmarks.",
+      "changes": [
+        "Dashboard com estatísticas e lista de exames",
+        "Download Exams com scraping real via ExamTopics",
+        "JSON Importer para importar exames",
+        "Scraper Guide com instruções CLI",
+        "Exam Simulator com modos practice, exam e flashcards",
+        "Discussion Board por questão",
+        "Bookmarks e histórico de prática",
+        "Tema dark/light"
+      ],
+      "git_tag": "v1.0.0",
+      "is_current": true
+    }
+  ],
+  "total_improvements": 0
+}
