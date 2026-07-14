@@ -144,7 +144,7 @@ Este portal destina-se apenas a fins de estudo e prática. Os dados importados d
 
 ---
 
-**Desenvolvido por:** André "Tinoco" Tinoco  
+**Desenvolvido por:** André "the Legend" Tinoco  \
 **Repositório:** https://github.com/TinocoAI/examtopics-simple  
 **Versão:** 2.0.0  
 **Data:** Julho 2026
